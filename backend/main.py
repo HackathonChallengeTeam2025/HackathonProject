@@ -20,7 +20,6 @@ import os
 
 load_dotenv()
 uri = os.getenv('uri')
-uri="mongodb+srv://HackathonChallengeTeam2025:Hackathon123$@hackathonchallengeteam2.3uqva.mongodb.net/?retryWrites=true&w=majority&appName=HackathonChallengeTeam2025"
 
 client = MongoClient(uri, server_api=ServerApi('1'))
 db_name = "Hackathon"
@@ -126,7 +125,11 @@ app.add_middleware(
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Models
+class ClickInstruction(BaseModel):
+    innerText: str
+    whatDoYouSeeOnTheScreen: str
+    didWeAchieveTheGoal: bool
+
 class ClickableComponent(BaseModel):
     innerText: str
 
@@ -138,32 +141,6 @@ class RequestData(BaseModel):
     current_url: str
     last_clicked_button: str
 
-class ClickInstruction(BaseModel):
-    innerText: str
-    whatDoYouSeeOnTheScreen: str
-    didWeAchieveTheGoal: bool
-
-class MctsRequest(BaseModel):
-    initialUrl: str
-    screenshot: str
-    clickableComponents: List[ClickableComponent]
-
-class ApiCall(BaseModel):
-    url: str
-    method: str
-    status: int
-    response: Optional[str] = None
-
-class MctsNode(BaseModel):
-    id: str  # Unique node ID
-    url: str
-    screenshot: str
-    clickableElements: List[ClickableComponent]
-    parentId: Optional[str] = None  # Reference to parent node
-    parentAction: Optional[str] = None  # Action that led to this node
-    depth: int
-    apiCalls: List[ApiCall] = []
-
 
 @app.post("/process")
 async def process_data(data: RequestData):
@@ -171,7 +148,7 @@ async def process_data(data: RequestData):
         image_url = f"data:image/png;base64,{data.screenshot.split(',')[1]}"
         components_text = "\n".join([comp["innerText"] for comp in data.clickableComponents])
         # current_state_id = get_state_id(data.clickableComponents)
-
+        instruction = None
         # Handle new thread
         if not data.thread_id:
             thread_id = str(uuid4())
@@ -241,35 +218,12 @@ async def process_data(data: RequestData):
             "goal": data.query,
             "last_clicked_button": instruction.innerText
         }
-
-        screenshot_path = save_screenshot(data.screenshot)
-
-        return {"instruction": instruction.innerText, "thread_id": thread_id}
+        with open("/Users/admin/Documents/HackathonProject/backend/db.json", "w") as f:
+            json.dump(db, f, indent=2)
+        screenshot_id = str(uuid4())
+        screenshot_path = save_screenshot(data.screenshot, screenshot_id)
+        if instruction.didWeAchieveTheGoal:
+            return {"instruction": instruction.innerText, "thread_id": thread_id, "goal_achieved": True}
+        return {"instruction": instruction.innerText, "thread_id": thread_id, "goal_achieved": False, "messages": messages}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-
-from fastapi.testclient import TestClient
-import asyncio
-
-json_data = {}
-with open("/Users/admin/Documents/HackathonProject/backend/data.json", "r") as f:
-    json_data = json.load(f)
-# Assuming 'app' is your FastAPI instance
-# client = TestClient(app)
-
-async def test_process_route():
-    payload = json_data
-    response = await process_data(
-        RequestData(
-            screenshot=payload["screenshot"],
-            clickableComponents=payload["clickableComponents"],
-            query=payload["query"],
-            thread_id=payload["thread_id"],
-            current_url=payload["current_url"],
-            last_clicked_button=payload["last_clicked_button"]
-        )
-    )
-    print(response)
-
-if __name__ == "__main__":
-    asyncio.run(test_process_route())
